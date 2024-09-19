@@ -7,7 +7,7 @@ require (
 	github.com/gorilla/mux v1.8.1
 	github.com/hashicorp/go-hclog v1.6.3
 	github.com/joho/godotenv v1.5.1
-	github.com/knockbox/authentication v0.0.0-20240919153604-0acea25836f7
+	github.com/knockbox/authentication v0.0.0-20240919205542-1527b7830484
 	github.com/stretchr/testify v1.9.0
 	golang.org/x/time v0.6.0
 )

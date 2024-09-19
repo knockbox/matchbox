@@ -57,5 +57,7 @@ func main() {
 	protectedRouter := apiRouter.PathPrefix("").Subrouter()
 	protectedRouter.Use(middleware.UseBearerToken(l).Middleware)
 
+	handlers.NewEvent(l).Route(protectedRouter)
+
 	utils.StartServerWithGracefulShutdown(sm, bindAddress, l)
 }
