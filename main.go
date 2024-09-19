@@ -51,6 +51,7 @@ func main() {
 
 	// Routes
 	handlers.NewHealthcheck().Route(apiRouter)
+	handlers.NewDocker(l).Route(apiRouter)
 
 	// protected grouping
 	protectedRouter := apiRouter.PathPrefix("").Subrouter()
