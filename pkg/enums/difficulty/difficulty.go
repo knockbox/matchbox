@@ -1,4 +1,4 @@
-package enums
+package difficulty
 
 type Difficulty string
 
