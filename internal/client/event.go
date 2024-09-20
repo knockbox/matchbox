@@ -17,8 +17,9 @@ import (
 type EventClient struct {
 	dc *docker.Client
 
-	event accessors.EventAccessor
-	l     hclog.Logger
+	event        accessors.EventAccessor
+	eventDetails accessors.EventDetailsAccessor
+	l            hclog.Logger
 }
 
 // NewEventClient creates a new EventClient using the SQLImpl accessors.
@@ -26,6 +27,10 @@ func NewEventClient(db *sqlx.DB, l hclog.Logger) *EventClient {
 	return &EventClient{
 		dc: docker.NewClient(l),
 		event: platform.EventSQLImpl{
+			DB:     db,
+			Logger: l,
+		},
+		eventDetails: platform.EventDetailsDQLImpl{
 			DB:     db,
 			Logger: l,
 		},
@@ -56,8 +61,14 @@ func (e *EventClient) CreateEvent(payload *payloads.EventCreate, organizer uuid.
 		return err
 	}
 
-	// TODO: Create the Event Details
-	e.l.Info("EventClient.CreateEvent", "result", result)
+	id, err := result.LastInsertId()
+	if err != nil {
+		return err
+	}
+
+	if _, err := e.eventDetails.CreateForEvent(int(id)); err != nil {
+		return err
+	}
 
 	return err
 }
@@ -73,4 +84,10 @@ func (e *EventClient) GetByActivityId(activityId string) (*models.Event, error) 
 	}
 
 	return event, err
+}
+
+func (e *EventClient) UpdateEventDetails(details *models.EventDetails, payload *payloads.EventDetailsUpdate) error {
+	details.ApplyUpdate(payload)
+	_, err := e.eventDetails.Update(*details)
+	return err
 }
