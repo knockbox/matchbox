@@ -2,7 +2,6 @@ package platform
 
 import (
 	"database/sql"
-	"github.com/hashicorp/go-hclog"
 	"github.com/jmoiron/sqlx"
 	"github.com/knockbox/authentication/pkg/utils"
 	"github.com/knockbox/matchbox/internal/queries"
@@ -11,7 +10,6 @@ import (
 
 type EventDetailsDQLImpl struct {
 	*sqlx.DB
-	hclog.Logger
 }
 
 func (e EventDetailsDQLImpl) CreateForEvent(id int) (sql.Result, error) {

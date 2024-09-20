@@ -19,6 +19,7 @@ type EventClient struct {
 
 	event        accessors.EventAccessor
 	eventDetails accessors.EventDetailsAccessor
+	flag         accessors.EventFlagAccessor
 	l            hclog.Logger
 }
 
@@ -27,12 +28,13 @@ func NewEventClient(db *sqlx.DB, l hclog.Logger) *EventClient {
 	return &EventClient{
 		dc: docker.NewClient(l),
 		event: platform.EventSQLImpl{
-			DB:     db,
-			Logger: l,
+			DB: db,
 		},
 		eventDetails: platform.EventDetailsDQLImpl{
-			DB:     db,
-			Logger: l,
+			DB: db,
+		},
+		flag: platform.EventFlagSQLImpl{
+			DB: db,
 		},
 		l: l,
 	}
@@ -89,5 +91,31 @@ func (e *EventClient) GetByActivityId(activityId string) (*models.Event, error) 
 func (e *EventClient) UpdateEventDetails(details *models.EventDetails, payload *payloads.EventDetailsUpdate) error {
 	details.ApplyUpdate(payload)
 	_, err := e.eventDetails.Update(*details)
+	return err
+}
+
+func (e *EventClient) CreateFlag(event *models.Event, payload *payloads.EventFlagCreate) error {
+	flag := models.NewEventFlag(event.Id)
+	flag.ApplyCreate(payload)
+
+	_, err := e.flag.Create(*flag)
+	return err
+}
+
+func (e *EventClient) UpdateFlag(event *models.Event, flagId uuid.UUID, payload *payloads.EventFlagUpdate) error {
+	flag := models.NewEventFlag(event.Id)
+	flag.ApplyUpdate(payload)
+	flag.FlagId = flagId
+
+	_, err := e.flag.Update(*flag)
+	return err
+}
+
+func (e *EventClient) GetAllEventFlags(event *models.Event) ([]models.EventFlag, error) {
+	return e.flag.GetAllForEvent(int(event.Id))
+}
+
+func (e *EventClient) DeleteEventFlag(flagId uuid.UUID) error {
+	_, err := e.flag.DeleteByFlagId(flagId)
 	return err
 }

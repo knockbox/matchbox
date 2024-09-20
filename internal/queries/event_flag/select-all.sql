@@ -1,0 +1,1 @@
+SELECT * FROM event_flags WHERE event_id = ?
