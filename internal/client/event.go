@@ -20,7 +20,9 @@ type EventClient struct {
 	event        accessors.EventAccessor
 	eventDetails accessors.EventDetailsAccessor
 	flag         accessors.EventFlagAccessor
-	l            hclog.Logger
+	participant  accessors.EventParticipantAccessor
+
+	l hclog.Logger
 }
 
 // NewEventClient creates a new EventClient using the SQLImpl accessors.
@@ -34,6 +36,9 @@ func NewEventClient(db *sqlx.DB, l hclog.Logger) *EventClient {
 			DB: db,
 		},
 		flag: platform.EventFlagSQLImpl{
+			DB: db,
+		},
+		participant: platform.EventParticipantSQLImpl{
 			DB: db,
 		},
 		l: l,
@@ -118,4 +123,16 @@ func (e *EventClient) GetAllEventFlags(event *models.Event) ([]models.EventFlag,
 func (e *EventClient) DeleteEventFlag(flagId uuid.UUID) error {
 	_, err := e.flag.DeleteByFlagId(flagId)
 	return err
+}
+
+func (e *EventClient) CreateParticipant(event *models.Event, id uuid.UUID, payload *payloads.EventParticipantCreate) error {
+	participant := models.NewEventParticipant(event, id)
+	participant.ApplyCreate(payload)
+
+	_, err := e.participant.Create(*participant)
+	return err
+}
+
+func (e *EventClient) GetAllParticipants(event *models.Event) ([]models.EventParticipant, error) {
+	return e.participant.GetAllByEventId(int(event.Id))
 }

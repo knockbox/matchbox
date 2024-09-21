@@ -219,6 +219,70 @@ func (e *Event) DeleteFlagForActivity(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (e *Event) CreateParticipantForActivity(w http.ResponseWriter, r *http.Request) {
+	event := r.Context().Value(middleware.ActivityIdContextKey).(*models.Event)
+	token := *r.Context().Value(middleware2.BearerTokenContextKey).(*jwt.Token)
+	accountId, _, _ := utils.ParseUserClaims(token)
+
+	if event.OrganizerId != accountId {
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+
+	rawParticipantId := mux.Vars(r)["participant_id"]
+	participantId, err := uuid.Parse(rawParticipantId)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		responses.NewGenericError("the provided participant id failed to parse").Encode(w)
+		return
+	}
+
+	payload := &payloads.EventParticipantCreate{}
+	if utils2.DecodeAndValidateStruct(w, r, payload) {
+		return
+	}
+
+	if err := e.ec.CreateParticipant(event, participantId, payload); err != nil {
+		http.Error(w, "failed to create participant", http.StatusInternalServerError)
+		e.l.Error("failed to create participant", "error", err, "payload", payload)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+}
+
+func (e *Event) GetParticipantsForActivity(w http.ResponseWriter, r *http.Request) {
+	event := r.Context().Value(middleware.ActivityIdContextKey).(*models.Event)
+	token := *r.Context().Value(middleware2.BearerTokenContextKey).(*jwt.Token)
+	accountId, _, _ := utils.ParseUserClaims(token)
+
+	if event.OrganizerId != accountId && event.Private {
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+
+	participants, err := e.ec.GetAllParticipants(event)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		e.l.Error("failed to get participants", "err", err)
+		return
+	}
+
+	if len(participants) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	var dtos []*models.EventParticipantDTO
+	for _, participant := range participants {
+		dtos = append(dtos, participant.DTO())
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(dtos)
+}
+
 func (e *Event) Route(r *mux.Router) {
 	eventRouter := r.PathPrefix("/events").Subrouter()
 	eventRouter.HandleFunc("", e.Create).Methods(http.MethodPost)
@@ -234,6 +298,10 @@ func (e *Event) Route(r *mux.Router) {
 	flagRouter.HandleFunc("", e.GetFlagForActivity).Methods(http.MethodGet)
 	flagRouter.HandleFunc("/{flag_id}", e.UpdateFlagForActivity).Methods(http.MethodPut)
 	flagRouter.HandleFunc("/{flag_id}", e.DeleteFlagForActivity).Methods(http.MethodDelete)
+
+	participantRouter := activityRouter.PathPrefix("/participants").Subrouter()
+	participantRouter.HandleFunc("/{participant_id}", e.CreateParticipantForActivity).Methods(http.MethodPost)
+	participantRouter.HandleFunc("", e.GetParticipantsForActivity).Methods(http.MethodGet)
 }
 
 func NewEvent(l hclog.Logger) *Event {

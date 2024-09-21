@@ -1,0 +1,1 @@
+SELECT * FROM event_participants WHERE event_id = ?
