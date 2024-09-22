@@ -10,5 +10,6 @@ type EventFlagAccessor interface {
 	Create(flag models.EventFlag) (sql.Result, error)
 	Update(flag models.EventFlag) (sql.Result, error)
 	GetAllForEvent(id int) ([]models.EventFlag, error)
+	GetByFlagId(id uuid.UUID) (*models.EventFlag, error)
 	DeleteByFlagId(flagId uuid.UUID) (sql.Result, error)
 }

@@ -28,6 +28,10 @@ func NewEventParticipant(ev *Event, id uuid.UUID) *EventParticipant {
 	}
 }
 
+func (p *EventParticipant) CanRedeemFlag() bool {
+	return p.Status == event.Member || p.Status == event.Invited
+}
+
 func (p *EventParticipant) ApplyCreate(payload *payloads.EventParticipantCreate) {
 	p.Status = payload.Status
 	p.CanInvite = *payload.CanInvite

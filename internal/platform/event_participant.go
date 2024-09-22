@@ -2,6 +2,7 @@ package platform
 
 import (
 	"database/sql"
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/knockbox/authentication/pkg/utils"
 	"github.com/knockbox/matchbox/internal/queries"
@@ -28,4 +29,10 @@ func (e EventParticipantSQLImpl) GetAllByEventId(id int) ([]models.EventParticip
 	var participants []models.EventParticipant
 	err := e.Select(&participants, queries.SelectAllParticipants, id)
 	return participants, err
+}
+
+func (e EventParticipantSQLImpl) GetByEventAndParticipantId(eventId int, participantId uuid.UUID) (*models.EventParticipant, error) {
+	participant := &models.EventParticipant{}
+	err := e.Get(participant, queries.SelectParticipantByEventAndId, participantId, eventId)
+	return participant, err
 }

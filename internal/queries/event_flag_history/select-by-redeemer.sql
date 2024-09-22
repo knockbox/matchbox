@@ -1,0 +1,1 @@
+SELECT * FROM event_flag_history WHERE event_id = ? AND flag_id = ? AND redeemer_id = ?

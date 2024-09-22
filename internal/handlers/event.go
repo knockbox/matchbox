@@ -18,6 +18,7 @@ import (
 	"github.com/knockbox/matchbox/pkg/utils"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"net/http"
+	"time"
 )
 
 type Event struct {
@@ -283,6 +284,91 @@ func (e *Event) GetParticipantsForActivity(w http.ResponseWriter, r *http.Reques
 	_ = json.NewEncoder(w).Encode(dtos)
 }
 
+func (e *Event) CaptureFlag(w http.ResponseWriter, r *http.Request) {
+	ev := r.Context().Value(middleware.ActivityIdContextKey).(*models.Event)
+	token := *r.Context().Value(middleware2.BearerTokenContextKey).(*jwt.Token)
+	accountId, _, _ := utils.ParseUserClaims(token)
+
+	// Event is active?
+	if !utils.TimeIsBeforeEnd(time.Now(), ev.EndsAt) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		responses.NewGenericError("this event has ended, flag(s) can no longer be redeemed").Encode(w)
+		return
+	}
+
+	// Get the user for the event.
+	participant, err := e.ec.GetParticipantByEventAndParticipantId(ev, accountId)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		responses.NewGenericError("failed to get participant for event").Encode(w)
+		e.l.Error("get participant failed for event", "err", err)
+		return
+	}
+
+	if participant == nil || !participant.CanRedeemFlag() {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		responses.NewGenericError("participant is not a member of this event").Encode(w)
+		return
+	}
+
+	// Parse the flag
+	rawFlag := mux.Vars(r)["flag_id"]
+	flag, err := uuid.Parse(rawFlag)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		responses.NewGenericError("failed to parse provided flag id").Encode(w)
+		return
+	}
+
+	existingFlag, err := e.ec.GetEventFlagByFlagId(flag)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		responses.NewGenericError("failed to get flag for event").Encode(w)
+		e.l.Error("get flag failed for event", "err", err, "flagId", flag)
+		return
+	}
+
+	if existingFlag == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		responses.NewGenericError("the provided flag could not be redeemed").Encode(w)
+		return
+	}
+
+	// Check if the flag has been redeemed already.
+	history, err := e.ec.GetRedeemedFlag(ev, participant, existingFlag)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		responses.NewGenericError("failed to check if flag was already redeemed").Encode(w)
+		e.l.Error("failed to check redeemed flag", "err", err, "event", ev, "participant", participant, "flag", existingFlag)
+		return
+	}
+
+	if history != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		responses.NewGenericError("flag was already redeemed").Encode(w)
+		return
+	}
+
+	// Redeem the flag
+	if err := e.ec.RedeemFlag(ev, participant, existingFlag); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		responses.NewGenericError("failed to redeem flag").Encode(w)
+		e.l.Error("failed to redeem flag", "err", err, "event", ev, "participant", participant, "flag", existingFlag)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (e *Event) Route(r *mux.Router) {
 	eventRouter := r.PathPrefix("/events").Subrouter()
 	eventRouter.HandleFunc("", e.Create).Methods(http.MethodPost)
@@ -292,6 +378,7 @@ func (e *Event) Route(r *mux.Router) {
 	activityRouter.Use(middleware.UseActivityId(e.ec, e.l).Middleware)
 
 	activityRouter.HandleFunc("", e.GetByActivityId).Methods(http.MethodGet)
+	activityRouter.HandleFunc("/capture/{flag_id}", e.CaptureFlag).Methods(http.MethodPost)
 
 	flagRouter := activityRouter.PathPrefix("/flags").Subrouter()
 	flagRouter.HandleFunc("", e.CreateFlagForActivity).Methods(http.MethodPost)

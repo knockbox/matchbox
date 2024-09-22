@@ -31,6 +31,12 @@ func (s EventFlagSQLImpl) GetAllForEvent(id int) ([]models.EventFlag, error) {
 	return flags, err
 }
 
+func (s EventFlagSQLImpl) GetByFlagId(id uuid.UUID) (*models.EventFlag, error) {
+	flag := &models.EventFlag{}
+	err := s.Get(flag, queries.SelectEventFlagByFlagId, id)
+	return flag, err
+}
+
 func (s EventFlagSQLImpl) DeleteByFlagId(flagId uuid.UUID) (sql.Result, error) {
 	return utils.Transact(s.DB, func(tx *sql.Tx) (sql.Result, error) {
 		return tx.Exec(queries.DeleteEventFlag, flagId)
