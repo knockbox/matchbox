@@ -1,0 +1,1 @@
+INSERT INTO deployments (instance_id, event_id) VALUES (?, ?)

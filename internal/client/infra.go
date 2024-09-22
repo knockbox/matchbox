@@ -1,0 +1,58 @@
+package client
+
+import (
+	"database/sql"
+	"errors"
+	"github.com/hashicorp/go-hclog"
+	"github.com/jmoiron/sqlx"
+	"github.com/knockbox/matchbox/internal/platform"
+	"github.com/knockbox/matchbox/pkg/accessors"
+	deployment2 "github.com/knockbox/matchbox/pkg/enums/deployment"
+	"github.com/knockbox/matchbox/pkg/models"
+)
+
+type Infra struct {
+	amz *Amazon
+	dep accessors.DeploymentAccessor
+}
+
+func NewInfra(db *sqlx.DB, l hclog.Logger) *Infra {
+	return &Infra{
+		amz: NewAmazon(db, l),
+		dep: platform.DeploymentSQLImpl{
+			DB: db,
+		},
+	}
+}
+
+func (i *Infra) CreateDeployment(event *models.Event) error {
+	deployment := models.NewDeployment(event)
+	result, err := i.dep.Create(*deployment)
+	if err != nil {
+		return err
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return err
+	}
+	deployment.Id = uint(id)
+
+	err = i.amz.InitForDeployment(int(id))
+	if err != nil {
+		return err
+	}
+
+	_, _ = i.dep.UpdateStatusById(int(id), deployment2.Idle)
+
+	return nil
+}
+
+func (i *Infra) GetDeploymentForEvent(event *models.Event) (*models.Deployment, error) {
+	deployment, err := i.dep.GetDeploymentByActivityId(event.ActivityId)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+
+	return deployment, err
+}

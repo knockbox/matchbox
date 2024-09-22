@@ -1,0 +1,1 @@
+UPDATE deployments SET status = ? WHERE id = ?

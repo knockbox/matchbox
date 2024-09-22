@@ -24,6 +24,7 @@ import (
 type Event struct {
 	l  hclog.Logger
 	ec *client.EventClient
+	in *client.Infra
 }
 
 func (e *Event) Create(w http.ResponseWriter, r *http.Request) {
@@ -41,7 +42,8 @@ func (e *Event) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := e.ec.CreateEvent(payload, accountId); err != nil {
+	event, err := e.ec.CreateEvent(payload, accountId)
+	if err != nil {
 		if utils2.IsDuplicateEntry(err) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
@@ -70,6 +72,17 @@ func (e *Event) Create(w http.ResponseWriter, r *http.Request) {
 		e.l.Error("failed to create event", "error", err, "payload", payload)
 		return
 	}
+
+	// Background task to prepare the infrastructure for the Event.
+	go func(in *client.Infra, event *models.Event) {
+		err := in.CreateDeployment(event)
+		if err != nil {
+			e.l.Error("CreateDeployment failed for event", "err", err, "activity_id", event.ActivityId)
+			return
+		}
+
+		e.l.Info("CreateDeployment success", "activity_id", event.ActivityId)
+	}(e.in, event)
 
 	w.WriteHeader(http.StatusCreated)
 }
@@ -400,5 +413,6 @@ func NewEvent(l hclog.Logger) *Event {
 	return &Event{
 		l:  l,
 		ec: client.NewEventClient(db, l),
+		in: client.NewInfra(db, l),
 	}
 }

@@ -1,0 +1,1 @@
+SELECT * FROM deployments WHERE event_id = ?

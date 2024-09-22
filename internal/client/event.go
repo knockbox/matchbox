@@ -49,10 +49,10 @@ func NewEventClient(db *sqlx.DB, l hclog.Logger) *EventClient {
 	}
 }
 
-func (e *EventClient) CreateEvent(payload *payloads.EventCreate, organizer uuid.UUID) error {
+func (e *EventClient) CreateEvent(payload *payloads.EventCreate, organizer uuid.UUID) (*models.Event, error) {
 	event := models.NewEvent(organizer)
 	if err := event.ApplyCreate(payload); err != nil {
-		return err
+		return nil, err
 	}
 
 	dockerResult := e.dc.CheckRepositoryTag(context.Background(), &docker.CheckRepositoryTagOptions{
@@ -61,27 +61,27 @@ func (e *EventClient) CreateEvent(payload *payloads.EventCreate, organizer uuid.
 		Tag:        event.ImageTag,
 	})
 	if dockerResult.Error != nil {
-		return dockerResult.Error
+		return nil, dockerResult.Error
 	}
 	if !dockerResult.Exists || dockerResult.Private {
-		return ErrDockerTagFailed
+		return nil, ErrDockerTagFailed
 	}
 
 	result, err := e.event.Create(*event)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	id, err := result.LastInsertId()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if _, err := e.eventDetails.CreateForEvent(int(id)); err != nil {
-		return err
+		return nil, err
 	}
 
-	return err
+	return event, err
 }
 
 func (e *EventClient) GetAllEvents() ([]models.Event, error) {

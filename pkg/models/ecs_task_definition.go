@@ -8,3 +8,11 @@ type ECSTaskDefinition struct {
 	FamilyId uuid.UUID `db:"family_id"`
 	AwsArn   string    `db:"aws_arn"`
 }
+
+func NewECSTaskDefinition() *ECSTaskDefinition {
+	return &ECSTaskDefinition{
+		Id:       0,
+		FamilyId: uuid.New(),
+		AwsArn:   "",
+	}
+}
