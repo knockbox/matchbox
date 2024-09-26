@@ -11,13 +11,13 @@ type TaskDefinitionCreatePayload struct {
 // TaskContainerDefinition defines the containers present in the task definition
 type TaskContainerDefinition struct {
 	// EnvironmentVars are the variables presented to the container. (these can be overridden when starting the task)
-	EnvironmentVars []*ContainerVariable `json:"env" validate:"dive,omitempty,gte=0"`
+	EnvironmentVars []*ContainerVariable `json:"env" validate:"omitempty,gte=0,dive"`
 
 	// Ports are the port mappings present in the container
 	Ports []ContainerPortMapping `json:"ports" validate:"required,gt=0,dive"`
 
 	// Volumes contains any additional volumes that can be attached to the container
-	Volumes []*ContainerVolume `json:"volumes" validate:"dive,omitempty,gte=0"`
+	Volumes []*ContainerVolume `json:"volumes" validate:"omitempty,gte=0,dive"`
 
 	// Image is the image name of the container: e.g. cesoun/knockbox:go-1.18.3
 	Image string `json:"image" validate:"required"`

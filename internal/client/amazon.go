@@ -31,6 +31,7 @@ type Amazon struct {
 	vpci    accessors.VPCInstanceAccessor
 	efsi    accessors.EFSInstanceAccessor
 	cluster accessors.ECSClusterAccessor
+	taskDef accessors.ECSTaskDefinitionAccessor
 
 	l hclog.Logger
 }
@@ -52,6 +53,9 @@ func NewAmazon(db *sqlx.DB, l hclog.Logger) *Amazon {
 			DB: db,
 		},
 		cluster: platform.ECSClusterSQLImpl{
+			DB: db,
+		},
+		taskDef: platform.ECSTaskDefinitionSQLImpl{
 			DB: db,
 		},
 		l: l,
@@ -405,6 +409,11 @@ func (a *Amazon) CreateTaskDefinition(dep *models.Deployment, payload *payloads.
 	a.l.Info("RegisterTaskDefinition success", "def", taskdef.FamilyId, "resources", hclog.Fmt("cpu: %s, memory: %s", payload.CPU, payload.Memory))
 
 	taskdef.AwsArn = *taskDefOutput.TaskDefinition.TaskDefinitionArn
+
+	if _, err := a.taskDef.Create(*taskdef); err != nil {
+		a.l.Error("Failed to insert TaskDefinition", "err", err)
+		return nil, err
+	}
 
 	return taskdef, nil
 }

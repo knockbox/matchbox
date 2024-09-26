@@ -382,6 +382,31 @@ func (e *Event) CaptureFlag(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (e *Event) CreateTaskDefinitionForActivity(w http.ResponseWriter, r *http.Request) {
+	ev := r.Context().Value(middleware.ActivityIdContextKey).(*models.Event)
+	token := *r.Context().Value(middleware2.BearerTokenContextKey).(*jwt.Token)
+	accountId, _, _ := utils.ParseUserClaims(token)
+
+	if ev.OrganizerId != accountId {
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+
+	payload := &payloads.TaskDefinitionCreatePayload{}
+	if utils2.DecodeAndValidateStruct(w, r, payload) {
+		return
+	}
+
+	if err := e.in.CreateTaskDefinitionForEvent(ev, payload); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		responses.NewGenericError(err.Error()).Encode(w)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+}
+
 func (e *Event) Route(r *mux.Router) {
 	eventRouter := r.PathPrefix("/events").Subrouter()
 	eventRouter.HandleFunc("", e.Create).Methods(http.MethodPost)
@@ -392,6 +417,7 @@ func (e *Event) Route(r *mux.Router) {
 
 	activityRouter.HandleFunc("", e.GetByActivityId).Methods(http.MethodGet)
 	activityRouter.HandleFunc("/capture/{flag_id}", e.CaptureFlag).Methods(http.MethodPost)
+	activityRouter.HandleFunc("/task-definition", e.CreateTaskDefinitionForActivity).Methods(http.MethodPost)
 
 	flagRouter := activityRouter.PathPrefix("/flags").Subrouter()
 	flagRouter.HandleFunc("", e.CreateFlagForActivity).Methods(http.MethodPost)
