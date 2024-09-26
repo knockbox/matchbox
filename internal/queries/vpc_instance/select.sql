@@ -1,0 +1,1 @@
+SELECT * FROM vpc_instances WHERE deployment_id = ?

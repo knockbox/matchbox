@@ -7,4 +7,5 @@ import (
 
 type EFSInstanceAccessor interface {
 	Create(efsi models.EFSInstance) (sql.Result, error)
+	GetByDeploymentId(id int) (*models.EFSInstance, error)
 }

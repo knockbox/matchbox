@@ -1,0 +1,1 @@
+SELECT * FROM ecs_task_definitions WHERE deployment_id = ?

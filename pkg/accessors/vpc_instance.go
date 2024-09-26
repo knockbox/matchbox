@@ -7,4 +7,5 @@ import (
 
 type VPCInstanceAccessor interface {
 	Create(vpc models.VPCInstance) (sql.Result, error)
+	GetByDeploymentId(id int) (*models.VPCInstance, error)
 }

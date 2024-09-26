@@ -1,0 +1,1 @@
+SELECT * FROM ecs_clusters WHERE deployment_id = ?

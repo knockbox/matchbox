@@ -2,11 +2,14 @@ package client
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
+	types3 "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 	"github.com/aws/aws-sdk-go-v2/service/efs"
 	types2 "github.com/aws/aws-sdk-go-v2/service/efs/types"
 	"github.com/google/uuid"
@@ -17,6 +20,7 @@ import (
 	"github.com/knockbox/matchbox/pkg/enums/ecs_cluster"
 	"github.com/knockbox/matchbox/pkg/enums/vpc_instance"
 	"github.com/knockbox/matchbox/pkg/models"
+	"github.com/knockbox/matchbox/pkg/payloads"
 )
 
 type Amazon struct {
@@ -54,6 +58,7 @@ func NewAmazon(db *sqlx.DB, l hclog.Logger) *Amazon {
 	}
 }
 
+// InitForDeployment creates a vpc, efs and ecs cluster for a given deployment id.
 func (a *Amazon) InitForDeployment(id int) error {
 	a.l.Info("Init Deployment", "id", id)
 
@@ -98,7 +103,17 @@ func (a *Amazon) InitForDeployment(id int) error {
 	return nil
 }
 
+// CreateVPC creates a new VPC for the given deployment id
 func (a *Amazon) CreateVPC(id int) (*models.VPCInstance, error) {
+	// Don't create a VPC if one already exists.
+	if existingVPC, err := a.GetVPC(id); err != nil {
+		a.l.Error("Failed to get existing vpc", "err", err)
+		return nil, err
+	} else if existingVPC != nil {
+		a.l.Info("An existing VPC was found", "deployment_id", id, "vpc_id", existingVPC.AwsResourceId)
+		return existingVPC, nil
+	}
+
 	vpc := models.NewVPCInstance(id)
 	ctx := context.Background()
 
@@ -193,7 +208,27 @@ func (a *Amazon) CreateVPC(id int) (*models.VPCInstance, error) {
 	return vpc, nil
 }
 
+// GetVPC returns a VPC based on the supplied deployment id
+func (a *Amazon) GetVPC(id int) (*models.VPCInstance, error) {
+	vpc, err := a.vpci.GetByDeploymentId(id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+
+	return vpc, err
+}
+
+// CreateEFS creates a new EFS for the given deployment id
 func (a *Amazon) CreateEFS(id int) (*models.EFSInstance, error) {
+	// Don't create a VPC if one already exists.
+	if existingEFS, err := a.GetEFS(id); err != nil {
+		a.l.Error("Failed to get existing efs", "err", err)
+		return nil, err
+	} else if existingEFS != nil {
+		a.l.Info("An existing EFS was found", "deployment_id", id, "efs_id", existingEFS.AwsResourceId)
+		return existingEFS, nil
+	}
+
 	ctx := context.Background()
 	efsi := models.NewEFSInstance(id)
 
@@ -227,7 +262,27 @@ func (a *Amazon) CreateEFS(id int) (*models.EFSInstance, error) {
 	return efsi, nil
 }
 
+// GetEFS returns an EFS based on the supplied deployment id
+func (a *Amazon) GetEFS(id int) (*models.EFSInstance, error) {
+	efsi, err := a.efsi.GetByDeploymentId(id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+
+	return efsi, err
+}
+
+// CreateECSCluster creates a new ECS Cluster for the given deployment id
 func (a *Amazon) CreateECSCluster(id int) (*models.ECSCluster, error) {
+	// Don't create a VPC if one already exists.
+	if existingCluster, err := a.GetECSCluster(id); err != nil {
+		a.l.Error("Failed to get existing cluster", "err", err)
+		return nil, err
+	} else if existingCluster != nil {
+		a.l.Info("An existing ecs cluster was found", "deployment_id", id, "cluster_name", existingCluster.ClusterName)
+		return existingCluster, nil
+	}
+
 	ctx := context.Background()
 	cluster := models.NewECSCluster(id)
 
@@ -248,22 +303,36 @@ func (a *Amazon) CreateECSCluster(id int) (*models.ECSCluster, error) {
 	return cluster, nil
 }
 
-/*
-func (a *Amazon) CreateInfrastructure(payload *payloads.TaskDefinitionCreatePayload) {
-	taskdef := models.NewECSTaskDefinition()
+// GetECSCluster returns an ECS Cluster based on the supplied deployment id
+func (a *Amazon) GetECSCluster(id int) (*models.ECSCluster, error) {
+	ecsi, err := a.cluster.GetByDeploymentId(id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
 
-	// Construct input from payload.
+	return ecsi, err
+}
+
+// CreateTaskDefinition creates the task definition for the given deployment.
+func (a *Amazon) CreateTaskDefinition(dep *models.Deployment, payload *payloads.TaskDefinitionCreatePayload) (*models.ECSTaskDefinition, error) {
+	depEfs, err := a.GetEFS(int(dep.Id))
+	if err != nil {
+		return nil, err
+	}
+
+	taskdef := models.NewECSTaskDefinition(dep.Id)
+
 	// Collect container definitions.
-	var containerDefs []types.ContainerDefinition
+	var containerDefs []types3.ContainerDefinition
 	for _, container := range payload.Containers {
-		def := types.ContainerDefinition{
+		def := types3.ContainerDefinition{
 			Image:     aws.String(container.Image),
 			Name:      aws.String(uuid.NewString()),
 			Essential: container.Essential,
 
 			// Logging - CloudWatch displays as: <taskdef.FamilyID>:<container_image>
-			LogConfiguration: &types.LogConfiguration{
-				LogDriver: types.LogDriverAwslogs,
+			LogConfiguration: &types3.LogConfiguration{
+				LogDriver: types3.LogDriverAwslogs,
 				Options: map[string]string{
 					"awslogs-create-group":  "true",
 					"awslogs-group":         taskdef.FamilyId.String(),
@@ -275,7 +344,7 @@ func (a *Amazon) CreateInfrastructure(payload *payloads.TaskDefinitionCreatePayl
 
 		// Populate environment variables
 		for _, envvar := range container.EnvironmentVars {
-			def.Environment = append(def.Environment, types.KeyValuePair{
+			def.Environment = append(def.Environment, types3.KeyValuePair{
 				Name:  aws.String(envvar.Key),
 				Value: aws.String(envvar.Value),
 			})
@@ -283,13 +352,13 @@ func (a *Amazon) CreateInfrastructure(payload *payloads.TaskDefinitionCreatePayl
 
 		// Populate ports
 		for _, port := range container.Ports {
-			protocol := types.TransportProtocolTcp
+			protocol := types3.TransportProtocolTcp
 			if port.Protocol != nil && *port.Protocol == "udp" {
-				protocol = types.TransportProtocolUdp
+				protocol = types3.TransportProtocolUdp
 			}
 
-			def.PortMappings = append(def.PortMappings, types.PortMapping{
-				AppProtocol:   types.ApplicationProtocolHttp,
+			def.PortMappings = append(def.PortMappings, types3.PortMapping{
+				AppProtocol:   types3.ApplicationProtocolHttp,
 				ContainerPort: aws.Int32(port.ContainerPort),
 				HostPort:      port.HostPort,
 				Name:          aws.String(port.Name),
@@ -299,7 +368,7 @@ func (a *Amazon) CreateInfrastructure(payload *payloads.TaskDefinitionCreatePayl
 
 		// Populate mount points
 		for _, volume := range container.Volumes {
-			def.MountPoints = append(def.MountPoints, types.MountPoint{
+			def.MountPoints = append(def.MountPoints, types3.MountPoint{
 				ContainerPath: aws.String(volume.Path),
 				ReadOnly:      volume.ReadOnly,
 				SourceVolume:  aws.String(volume.Source),
@@ -309,31 +378,33 @@ func (a *Amazon) CreateInfrastructure(payload *payloads.TaskDefinitionCreatePayl
 		containerDefs = append(containerDefs, def)
 	}
 
-	// Collect EFS volumes.
-	var volumes []types.Volume
-	for _, volume := range payload.Volumes {
-		volumes = append(volumes, types.Volume{
-			EfsVolumeConfiguration: &types.EFSVolumeConfiguration{
-				FileSystemId: aws.String(volume.ID),
-			},
-			Name: aws.String(volume.Name),
-		})
-	}
-
 	// Prepare aws input.
 	taskDefInput := &ecs.RegisterTaskDefinitionInput{
 		ContainerDefinitions:    containerDefs,
 		Family:                  aws.String(taskdef.FamilyId.String()),
 		Cpu:                     aws.String(payload.CPU),
 		Memory:                  aws.String(payload.Memory),
-		NetworkMode:             types.NetworkModeAwsvpc,
-		RequiresCompatibilities: []types.Compatibility{types.CompatibilityFargate},
+		NetworkMode:             types3.NetworkModeAwsvpc,
+		RequiresCompatibilities: []types3.Compatibility{types3.CompatibilityFargate},
 		ExecutionRoleArn:        aws.String("arn:aws:iam::588285845198:role/ecsTaskExecutionRole"),
 		TaskRoleArn:             aws.String("arn:aws:iam::588285845198:role/ecsTaskExecutionRole"),
-		Volumes:                 volumes,
+		Volumes: []types3.Volume{
+			{
+				EfsVolumeConfiguration: &types3.EFSVolumeConfiguration{
+					FileSystemId: aws.String(depEfs.AWSFileSystemId),
+				},
+				Name: aws.String("efs"),
+			},
+		},
 	}
 	taskDefOutput, err := a.ecsClient.RegisterTaskDefinition(context.Background(), taskDefInput)
+	if err != nil {
+		a.l.Error("RegisterTaskDefinition failed", "err", err, "payload", payload)
+		return nil, err
+	}
+	a.l.Info("RegisterTaskDefinition success", "def", taskdef.FamilyId, "resources", hclog.Fmt("cpu: %s, memory: %s", payload.CPU, payload.Memory))
 
-	// Create the Instance
+	taskdef.AwsArn = *taskDefOutput.TaskDefinition.TaskDefinitionArn
+
+	return taskdef, nil
 }
-*/

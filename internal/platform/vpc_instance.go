@@ -12,6 +12,12 @@ type VPCInstanceSQLImpl struct {
 	*sqlx.DB
 }
 
+func (v VPCInstanceSQLImpl) GetByDeploymentId(id int) (*models.VPCInstance, error) {
+	instance := &models.VPCInstance{}
+	err := v.Get(instance, queries.SelectVPCInstance, id)
+	return instance, err
+}
+
 func (v VPCInstanceSQLImpl) Create(vpc models.VPCInstance) (sql.Result, error) {
 	return utils.Transact(v.DB, func(tx *sql.Tx) (sql.Result, error) {
 		return tx.Exec(queries.InsertVPCInstance, vpc.DeploymentId, vpc.AwsResourceId, vpc.SubnetID, vpc.SecurityGroupID, vpc.InternetGatewayID, vpc.State)

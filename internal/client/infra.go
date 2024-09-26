@@ -9,6 +9,7 @@ import (
 	"github.com/knockbox/matchbox/pkg/accessors"
 	deployment2 "github.com/knockbox/matchbox/pkg/enums/deployment"
 	"github.com/knockbox/matchbox/pkg/models"
+	"github.com/knockbox/matchbox/pkg/payloads"
 )
 
 type Infra struct {
@@ -55,4 +56,21 @@ func (i *Infra) GetDeploymentForEvent(event *models.Event) (*models.Deployment, 
 	}
 
 	return deployment, err
+}
+
+func (i *Infra) CreateTaskDefinitionForEvent(event *models.Event, payload *payloads.TaskDefinitionCreatePayload) error {
+	// Ensure the deployment exists.
+	dep, err := i.GetDeploymentForEvent(event)
+	if err != nil {
+		return err
+	}
+	if dep == nil {
+		return ErrDeploymentDoesNotExist
+	}
+	if dep.Status != deployment2.Idle {
+		return ErrDeploymentNotReady
+	}
+
+	_, err = i.amz.CreateTaskDefinition(dep, payload)
+	return err
 }

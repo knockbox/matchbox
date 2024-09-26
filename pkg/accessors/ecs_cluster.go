@@ -7,4 +7,5 @@ import (
 
 type ECSClusterAccessor interface {
 	Create(cluster models.ECSCluster) (sql.Result, error)
+	GetByDeploymentId(id int) (*models.ECSCluster, error)
 }
