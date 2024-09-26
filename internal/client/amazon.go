@@ -319,6 +319,15 @@ func (a *Amazon) GetECSCluster(id int) (*models.ECSCluster, error) {
 
 // CreateTaskDefinition creates the task definition for the given deployment.
 func (a *Amazon) CreateTaskDefinition(dep *models.Deployment, payload *payloads.TaskDefinitionCreatePayload) (*models.ECSTaskDefinition, error) {
+	// Don't create a VPC if one already exists.
+	if existingDef, err := a.GetTaskDefinition(int(dep.Id)); err != nil {
+		a.l.Error("Failed to get existing task definition", "err", err)
+		return nil, err
+	} else if existingDef != nil {
+		a.l.Info("An existing task definition was found", "deployment_id", dep.Id, "family_id", existingDef.FamilyId)
+		return existingDef, nil
+	}
+
 	depEfs, err := a.GetEFS(int(dep.Id))
 	if err != nil {
 		return nil, err
@@ -416,4 +425,90 @@ func (a *Amazon) CreateTaskDefinition(dep *models.Deployment, payload *payloads.
 	}
 
 	return taskdef, nil
+}
+
+// GetTaskDefinition returns the Task Definition based on the supplied deployment id
+func (a *Amazon) GetTaskDefinition(id int) (*models.ECSTaskDefinition, error) {
+	def, err := a.taskDef.GetByDeploymentId(id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+
+	return def, err
+}
+
+func (a *Amazon) StartTask(dep *models.Deployment, owner uuid.UUID, flags []models.EventFlag) (*models.ECSTaskInstance, error) {
+	depVpc, err := a.GetVPC(int(dep.Id))
+	if err != nil {
+		return nil, err
+	}
+	depCluster, err := a.GetECSCluster(int(dep.Id))
+	if err != nil {
+		return nil, err
+	}
+	depTaskDef, err := a.GetTaskDefinition(int(dep.Id))
+	if err != nil {
+		return nil, err
+	}
+
+	ctx := context.Background()
+	inst := models.NewTaskInstance(depTaskDef.Id, depCluster.Id, owner)
+
+	// Describe the TaskDef.
+	tdOutput, err := a.ecsClient.DescribeTaskDefinition(ctx, &ecs.DescribeTaskDefinitionInput{
+		TaskDefinition: aws.String(depTaskDef.AwsArn),
+	})
+	if err != nil {
+		a.l.Error("failed to describe task def", "err", err, "task_def.aws_arn", depTaskDef.AwsArn)
+		return nil, err
+	}
+
+	// Create overrides for the Flags.
+	var overrides []types3.ContainerOverride
+	for _, container := range tdOutput.TaskDefinition.ContainerDefinitions {
+		override := types3.ContainerOverride{
+			Environment: make([]types3.KeyValuePair, 0),
+			Name:        container.Name,
+		}
+
+		for _, flag := range flags {
+			override.Environment = append(override.Environment, types3.KeyValuePair{
+				Name:  aws.String(flag.EnvVar),
+				Value: aws.String(flag.FlagId.String()),
+			})
+		}
+
+		overrides = append(overrides, override)
+	}
+
+	// Run the Task
+	taskOutput, err := a.ecsClient.RunTask(ctx, &ecs.RunTaskInput{
+		TaskDefinition: aws.String(depTaskDef.AwsArn),
+		Cluster:        aws.String(depCluster.AwsArn),
+		Count:          aws.Int32(1),
+		LaunchType:     types3.LaunchTypeFargate,
+		NetworkConfiguration: &types3.NetworkConfiguration{
+			AwsvpcConfiguration: &types3.AwsVpcConfiguration{
+				Subnets:        []string{depVpc.SubnetID},
+				AssignPublicIp: types3.AssignPublicIpEnabled,
+				SecurityGroups: []string{depVpc.SecurityGroupID},
+			},
+		},
+		Overrides: &types3.TaskOverride{
+			ContainerOverrides: overrides,
+		},
+		ReferenceId: aws.String(uuid.NewString()),
+	})
+	if err != nil {
+		a.l.Error("failed to run task", "err", err, "task_def.aws_arn", depTaskDef.AwsArn)
+	}
+
+	for _, failure := range taskOutput.Failures {
+		a.l.Warn("Task Failure", "Arn", *failure.Arn, "Detail", *failure.Detail, "Reason", *failure.Reason)
+	}
+	for _, task := range taskOutput.Tasks {
+		a.l.Info("Task", "Started At", task.StartedAt, "Pull Start", task.PullStartedAt)
+	}
+
+	return inst, nil
 }

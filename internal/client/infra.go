@@ -3,6 +3,7 @@ package client
 import (
 	"database/sql"
 	"errors"
+	"github.com/google/uuid"
 	"github.com/hashicorp/go-hclog"
 	"github.com/jmoiron/sqlx"
 	"github.com/knockbox/matchbox/internal/platform"
@@ -72,5 +73,46 @@ func (i *Infra) CreateTaskDefinitionForEvent(event *models.Event, payload *paylo
 	}
 
 	_, err = i.amz.CreateTaskDefinition(dep, payload)
+	return err
+}
+
+func (i *Infra) GetTaskDefinitionForEvent(event *models.Event) (*models.ECSTaskDefinition, error) {
+	// Ensure the deployment exists.
+	dep, err := i.GetDeploymentForEvent(event)
+	if err != nil {
+		return nil, err
+	}
+	if dep == nil {
+		return nil, ErrDeploymentDoesNotExist
+	}
+	if dep.Status != deployment2.Idle {
+		return nil, ErrDeploymentNotReady
+	}
+
+	def, err := i.amz.GetTaskDefinition(int(dep.Id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+
+	return def, err
+}
+
+func (i *Infra) StartTaskForEvent(event *models.Event, flags []models.EventFlag, owner uuid.UUID) error {
+	// Ensure the deployment exists.
+	dep, err := i.GetDeploymentForEvent(event)
+	if err != nil {
+		return err
+	}
+	if dep == nil {
+		return ErrDeploymentDoesNotExist
+	}
+	if dep.Status != deployment2.Idle {
+		return ErrDeploymentNotReady
+	}
+
+	_, err = i.amz.StartTask(dep, owner, flags)
+
+	// TODO: This
+
 	return err
 }

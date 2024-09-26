@@ -407,6 +407,43 @@ func (e *Event) CreateTaskDefinitionForActivity(w http.ResponseWriter, r *http.R
 	w.WriteHeader(http.StatusCreated)
 }
 
+func (e *Event) StartTaskForActivity(w http.ResponseWriter, r *http.Request) {
+	ev := r.Context().Value(middleware.ActivityIdContextKey).(*models.Event)
+	token := *r.Context().Value(middleware2.BearerTokenContextKey).(*jwt.Token)
+	accountId, _, _ := utils.ParseUserClaims(token)
+
+	participant, err := e.ec.GetParticipantByEventAndParticipantId(ev, accountId)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		responses.NewGenericError("failed to retrieve participants for event").Encode(w)
+		return
+	}
+
+	if participant == nil || !participant.CanRedeemFlag() {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		responses.NewGenericError("you are not a member of this event").Encode(w)
+		return
+	}
+
+	flags, err := e.ec.GetAllEventFlags(ev)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		responses.NewGenericError(err.Error()).Encode(w)
+		return
+	}
+
+	if err := e.in.StartTaskForEvent(ev, flags, accountId); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		responses.NewGenericError(err.Error()).Encode(w)
+	}
+
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 func (e *Event) Route(r *mux.Router) {
 	eventRouter := r.PathPrefix("/events").Subrouter()
 	eventRouter.HandleFunc("", e.Create).Methods(http.MethodPost)
@@ -417,7 +454,8 @@ func (e *Event) Route(r *mux.Router) {
 
 	activityRouter.HandleFunc("", e.GetByActivityId).Methods(http.MethodGet)
 	activityRouter.HandleFunc("/capture/{flag_id}", e.CaptureFlag).Methods(http.MethodPost)
-	activityRouter.HandleFunc("/task-definition", e.CreateTaskDefinitionForActivity).Methods(http.MethodPost)
+	activityRouter.HandleFunc("/task", e.CreateTaskDefinitionForActivity).Methods(http.MethodPost)
+	activityRouter.HandleFunc("/task", e.StartTaskForActivity).Methods(http.MethodGet)
 
 	flagRouter := activityRouter.PathPrefix("/flags").Subrouter()
 	flagRouter.HandleFunc("", e.CreateFlagForActivity).Methods(http.MethodPost)

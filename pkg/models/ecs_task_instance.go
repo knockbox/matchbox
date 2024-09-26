@@ -20,3 +20,19 @@ type ECSTaskInstance struct {
 	Status              ecs_task_instance.Status `db:"status"`
 	InstanceOwnerId     uuid.UUID                `db:"instance_owner_id"`
 }
+
+func NewTaskInstance(taskDefId, clusterId uint, owner uuid.UUID) *ECSTaskInstance {
+	return &ECSTaskInstance{
+		Id:                  0,
+		AwsArn:              "",
+		ECSTaskDefinitionId: taskDefId,
+		ECSClusterId:        clusterId,
+		PullStart:           time.Time{},
+		PullEnd:             time.Time{},
+		StartedAt:           time.Time{},
+		StoppedAt:           time.Time{},
+		StoppedReason:       "",
+		Status:              ecs_task_instance.Unknown,
+		InstanceOwnerId:     owner,
+	}
+}
