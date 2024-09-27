@@ -1,6 +1,7 @@
 UPDATE
     ecs_task_instances
 SET
+    aws_arn = ?,
     pull_start = ?,
     pull_stop = ?,
     started_at = ?,

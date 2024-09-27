@@ -111,8 +111,18 @@ func (i *Infra) StartTaskForEvent(event *models.Event, flags []models.EventFlag,
 	}
 
 	_, err = i.amz.StartTask(dep, owner, flags)
-
-	// TODO: This
-
 	return err
+}
+
+func (i *Infra) StopTaskForEvent(event *models.Event, owner uuid.UUID) error {
+	// Ensure the definition exists.
+	def, err := i.GetTaskDefinitionForEvent(event)
+	if err != nil {
+		return err
+	}
+	if def == nil {
+		return ErrTaskDefDoesNotExist
+	}
+
+	return i.amz.StopTask(int(def.Id), owner)
 }

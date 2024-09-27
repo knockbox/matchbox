@@ -30,10 +30,11 @@ type Amazon struct {
 	ecsClient *ecs.Client
 	efsClient *efs.Client
 
-	vpci    accessors.VPCInstanceAccessor
-	efsi    accessors.EFSInstanceAccessor
-	cluster accessors.ECSClusterAccessor
-	taskDef accessors.ECSTaskDefinitionAccessor
+	vpci     accessors.VPCInstanceAccessor
+	efsi     accessors.EFSInstanceAccessor
+	cluster  accessors.ECSClusterAccessor
+	taskDef  accessors.ECSTaskDefinitionAccessor
+	taskInst accessors.TaskInstanceAccessor
 
 	l hclog.Logger
 }
@@ -58,6 +59,9 @@ func NewAmazon(db *sqlx.DB, l hclog.Logger) *Amazon {
 			DB: db,
 		},
 		taskDef: platform.ECSTaskDefinitionSQLImpl{
+			DB: db,
+		},
+		taskInst: platform.ECSTaskInstanceSQLImpl{
 			DB: db,
 		},
 		l: l,
@@ -539,6 +543,7 @@ func (a *Amazon) GetTaskDefinition(id int) (*models.ECSTaskDefinition, error) {
 	return def, err
 }
 
+// StartTask starts a task
 func (a *Amazon) StartTask(dep *models.Deployment, owner uuid.UUID, flags []models.EventFlag) (*models.ECSTaskInstance, error) {
 	depVpc, err := a.GetVPC(int(dep.Id))
 	if err != nil {
@@ -564,8 +569,21 @@ func (a *Amazon) StartTask(dep *models.Deployment, owner uuid.UUID, flags []mode
 		return nil, ErrTaskDefDoesNotExist
 	}
 
+	var inst *models.ECSTaskInstance
+	shouldUpdate := false
+
+	inst, err = a.GetTask(int(depTaskDef.Id), owner)
+	if err != nil {
+		a.l.Error("GetTask failed", "err", err)
+		return nil, err
+	}
+	if inst == nil {
+		inst = models.NewTaskInstance(depTaskDef.Id, depCluster.Id, owner)
+	} else {
+		shouldUpdate = true
+	}
+
 	ctx := context.Background()
-	inst := models.NewTaskInstance(depTaskDef.Id, depCluster.Id, owner)
 
 	// Describe the TaskDef.
 	tdOutput, err := a.ecsClient.DescribeTaskDefinition(ctx, &ecs.DescribeTaskDefinitionInput{
@@ -638,10 +656,120 @@ func (a *Amazon) StartTask(dep *models.Deployment, owner uuid.UUID, flags []mode
 
 	for _, failure := range taskOutput.Failures {
 		a.l.Warn("Task Failure", "Arn", *failure.Arn, "Detail", *failure.Detail, "Reason", *failure.Reason)
+		return nil, ErrTaskFailure
 	}
+
+	// There should only be one task so we could direct access, but it shouldn't matter.
 	for _, task := range taskOutput.Tasks {
-		a.l.Info("Task", "Started At", task.StartedAt, "Pull Start", task.PullStartedAt)
+		inst.UpdateFromTask(task)
+	}
+
+	if shouldUpdate {
+		// Update the Instance in the database.
+		if _, err := a.taskInst.Update(*inst); err != nil {
+			a.l.Error("Failed to update Task", "err", err)
+			return inst, err
+		}
+	} else {
+		// Register the Instance in the database.
+		if _, err := a.taskInst.Create(*inst); err != nil {
+			a.l.Error("Failed to insert Task", "err", err)
+			return inst, err
+		}
 	}
 
 	return inst, nil
+}
+
+// GetTask returns a task
+func (a *Amazon) GetTask(taskDefId int, owner uuid.UUID) (*models.ECSTaskInstance, error) {
+	inst, err := a.taskInst.Select(taskDefId, owner)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+
+	return inst, err
+}
+
+// GetAndUpdateTask retrieves and updates a task status
+func (a *Amazon) GetAndUpdateTask(taskDefId int, owner uuid.UUID) (*models.ECSTaskInstance, error) {
+	inst, err := a.GetTask(taskDefId, owner)
+	if err != nil {
+		a.l.Error("GetTask failed", "err", err)
+		return nil, err
+	}
+	if inst == nil {
+		return nil, ErrTaskDoesNotExist
+	}
+
+	cluster, err := a.GetECSCluster(int(inst.ECSClusterId))
+	if err != nil {
+		a.l.Error("GetCluster for Instance", "err", err)
+		return nil, err
+	}
+	if cluster == nil {
+		return nil, ErrClusterDoesNotExist
+	}
+
+	tasks, err := a.ecsClient.DescribeTasks(context.Background(), &ecs.DescribeTasksInput{
+		Tasks:   []string{inst.AwsArn},
+		Cluster: aws.String(cluster.AwsArn),
+	})
+	if err != nil {
+		a.l.Error("DescribeTasks", "err", err, "task.arn", inst.AwsArn, "cluster.arn", cluster.AwsArn)
+		return nil, err
+	}
+
+	for _, task := range tasks.Tasks {
+		inst.UpdateFromTask(task)
+	}
+
+	// Update the Instance in the database.
+	if _, err := a.taskInst.Update(*inst); err != nil {
+		a.l.Error("Failed to update Task", "err", err)
+		return inst, err
+	}
+
+	return inst, nil
+}
+
+// StopTask will stop a task for a user.
+func (a *Amazon) StopTask(taskDefId int, owner uuid.UUID) error {
+	inst, err := a.GetTask(taskDefId, owner)
+	if err != nil {
+		a.l.Error("GetTask failed", "err", err)
+		return err
+	}
+	if inst == nil {
+		return ErrTaskDoesNotExist
+	}
+
+	cluster, err := a.GetECSCluster(int(inst.ECSClusterId))
+	if err != nil {
+		a.l.Error("GetCluster for Instance", "err", err)
+		return err
+	}
+	if cluster == nil {
+		return ErrClusterDoesNotExist
+	}
+
+	stopOutput, err := a.ecsClient.StopTask(context.Background(), &ecs.StopTaskInput{
+		Task:    aws.String(inst.AwsArn),
+		Cluster: aws.String(cluster.AwsArn),
+		Reason:  aws.String("Client task stop requested"),
+	})
+	if err != nil {
+		a.l.Error("StopTask", "err", err, "task.arn", inst.AwsArn, "cluster.arn", cluster.AwsArn)
+		return err
+	}
+
+	inst.UpdateFromTask(*stopOutput.Task)
+
+	// Update the Instance in the database.
+	if _, err := a.taskInst.Update(*inst); err != nil {
+		a.l.Error("Failed to update Task", "err", err)
+		return err
+	}
+
+	return nil
 }

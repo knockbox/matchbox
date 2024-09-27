@@ -9,4 +9,6 @@ var (
 	ErrVPCDoesNotExist        = errors.New("the deployment is missing a vpc")
 	ErrClusterDoesNotExist    = errors.New("the deployment is missing a cluster")
 	ErrTaskDefDoesNotExist    = errors.New("the deployment is missing a task definition")
+	ErrTaskFailure            = errors.New("the task failed to start")
+	ErrTaskDoesNotExist       = errors.New("the task does not exist")
 )

@@ -27,7 +27,7 @@ func (e ECSTaskInstanceSQLImpl) Select(taskDefId int, owner uuid.UUID) (*models.
 
 func (e ECSTaskInstanceSQLImpl) Update(task models.ECSTaskInstance) (sql.Result, error) {
 	return utils.Transact(e.DB, func(tx *sql.Tx) (sql.Result, error) {
-		return tx.Exec(queries.UpdateTaskInstance, task.PullStart, task.PullEnd, task.StartedAt, task.StoppedAt, task.StoppedReason, task.Status, task.ECSTaskDefinitionId, task.InstanceOwnerId)
+		return tx.Exec(queries.UpdateTaskInstance, task.AwsArn, task.PullStart, task.PullStop, task.StartedAt, task.StoppedAt, task.StoppedReason, task.Status, task.ECSTaskDefinitionId, task.InstanceOwnerId)
 	})
 }
 
