@@ -96,6 +96,7 @@ func (a *Amazon) InitForDeployment(id int) error {
 
 	// Background Task for Mount Targets
 	go func() {
+		a.l.Info("Attempt to Mount Targets", "start", time.Now().Add(5*time.Second), "file_system", efsi.AWSFileSystemId)
 		ticker := time.NewTicker(5 * time.Second)
 
 		for {
@@ -137,6 +138,7 @@ func (a *Amazon) InitForDeployment(id int) error {
 					a.l.Error("CreateMountTargets failed", err)
 				}
 
+				a.l.Info("Mount Targets finished", "stopped", time.Now())
 				ticker.Stop()
 				return
 			}

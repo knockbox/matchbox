@@ -8,6 +8,6 @@ SET
     stopped_reason = ?,
     status = ?
 WHERE
-    instance_owner_id = ?
-AND
     ecs_task_definition_id = ?
+AND
+    instance_owner_id = ?

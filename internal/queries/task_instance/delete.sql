@@ -1,1 +1,5 @@
-DELETE FROM ecs_task_instances WHERE instance_owner_id = ?
+DELETE FROM ecs_task_instances
+WHERE
+    ecs_task_definition_id = ?
+AND
+    instance_owner_id = ?
