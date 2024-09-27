@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -21,6 +22,7 @@ import (
 	"github.com/knockbox/matchbox/pkg/enums/vpc_instance"
 	"github.com/knockbox/matchbox/pkg/models"
 	"github.com/knockbox/matchbox/pkg/payloads"
+	"time"
 )
 
 type Amazon struct {
@@ -92,6 +94,55 @@ func (a *Amazon) InitForDeployment(id int) error {
 		return err
 	}
 
+	// Background Task for Mount Targets
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+
+		for {
+			select {
+			case <-ticker.C:
+				a.l.Info("DescribeFileSystems await for mount targets", "FileSystemId", efsi.AWSFileSystemId)
+
+				output, err := a.efsClient.DescribeFileSystems(context.Background(), &efs.DescribeFileSystemsInput{
+					FileSystemId: aws.String(efsi.AWSFileSystemId),
+				})
+				if err != nil {
+					a.l.Error("DescribeFileSystems failed", "err", err)
+					a.l.Warn("Failed to create MountTargets", "efs_id", efsi.AWSFileSystemId)
+
+					ticker.Stop()
+					return
+				}
+
+				fs := output.FileSystems[0]
+
+				// Bad
+				if fs.LifeCycleState == types2.LifeCycleStateError ||
+					fs.LifeCycleState == types2.LifeCycleStateDeleting ||
+					fs.LifeCycleState == types2.LifeCycleStateDeleted {
+					a.l.Error("DescribeFileSystems cannot mount targets", "LifeCycleState", fs.LifeCycleState, "FileSystemId", fs.FileSystemId)
+
+					ticker.Stop()
+					return
+				}
+
+				// Busy
+				if fs.LifeCycleState == types2.LifeCycleStateCreating || fs.LifeCycleState == types2.LifeCycleStateUpdating {
+					a.l.Info("DescribeFileSystems is busy, will try again", "LifeCycleState", fs.LifeCycleState, "FileSystemId", fs.FileSystemId)
+					break
+				}
+
+				// Do it.
+				if err := a.CreateEFSMountTargets(vpc, efsi); err != nil {
+					a.l.Error("CreateMountTargets failed", err)
+				}
+
+				ticker.Stop()
+				return
+			}
+		}
+	}()
+
 	// Create the ECS Cluster
 	a.l.Info("Create ECS Cluster", "deployment_id", id)
 	cluster, err := a.CreateECSCluster(id)
@@ -131,6 +182,33 @@ func (a *Amazon) CreateVPC(id int) (*models.VPCInstance, error) {
 	}
 	a.l.Info("CreateVPC success", "vpc_id", *vpcOutput.Vpc.VpcId)
 
+	_, err = a.ec2Client.ModifyVpcAttribute(ctx, &ec2.ModifyVpcAttributeInput{
+		VpcId:              vpcOutput.Vpc.VpcId,
+		EnableDnsHostnames: &types.AttributeBooleanValue{Value: aws.Bool(true)},
+	})
+	if err != nil {
+		a.l.Error("ModifyVpcAttribute failed", "err", err, "vpc_id", *vpcOutput.Vpc.VpcId)
+	}
+	a.l.Info("ModifyVpcAttribute success, enabled DNS Hostnames")
+
+	// Create all the subnets.
+	for i := 0; i < 6; i++ {
+		az := fmt.Sprintf("use1-az%d", i+1)
+		cidr := fmt.Sprintf("10.0.%d.0/20", i*16)
+
+		// Create the subnet
+		subnetOutput, err := a.ec2Client.CreateSubnet(ctx, &ec2.CreateSubnetInput{
+			VpcId:              vpcOutput.Vpc.VpcId,
+			AvailabilityZoneId: aws.String(az),
+			CidrBlock:          aws.String(cidr),
+		})
+		if err != nil {
+			a.l.Error("CreateSubnet failed", "err", err, "deployment_id", id, "az", az, "cidr", cidr)
+			return nil, err
+		}
+		a.l.Info("CreateSubnet success", "subnet_id", *subnetOutput.Subnet.SubnetId, "az", az, "cidr", cidr)
+	}
+
 	// Create the InternetGateway
 	igwOutput, err := a.ec2Client.CreateInternetGateway(ctx, &ec2.CreateInternetGatewayInput{})
 	if err != nil {
@@ -149,17 +227,6 @@ func (a *Amazon) CreateVPC(id int) (*models.VPCInstance, error) {
 		return nil, err
 	}
 	a.l.Info("AttachInternetGateway success", "deployment_id", id)
-
-	// Create the subnet
-	subnetOutput, err := a.ec2Client.CreateSubnet(ctx, &ec2.CreateSubnetInput{
-		VpcId:     vpcOutput.Vpc.VpcId,
-		CidrBlock: vpcOutput.Vpc.CidrBlock,
-	})
-	if err != nil {
-		a.l.Error("CreateSubnet failed", "err", err, "deployment_id", id)
-		return nil, err
-	}
-	a.l.Info("CreateSubnet success", "subnet_id", *subnetOutput.Subnet.SubnetId)
 
 	// Get VPC Security Details
 	sgOutput, err := a.ec2Client.DescribeSecurityGroups(ctx, &ec2.DescribeSecurityGroupsInput{
@@ -204,7 +271,7 @@ func (a *Amazon) CreateVPC(id int) (*models.VPCInstance, error) {
 	a.l.Info("CreateRoute success")
 
 	vpc.AwsResourceId = *vpcOutput.Vpc.VpcId
-	vpc.SubnetID = *subnetOutput.Subnet.SubnetId
+	//vpc.SubnetID = *subnetOutput.Subnet.SubnetId
 	vpc.SecurityGroupID = *sgOutput.SecurityGroups[0].GroupId
 	vpc.InternetGatewayID = *igwOutput.InternetGateway.InternetGatewayId
 	vpc.State = vpc_instance.Available
@@ -264,6 +331,39 @@ func (a *Amazon) CreateEFS(id int) (*models.EFSInstance, error) {
 	a.l.Info("FileSystem created", "fs_id", efsi.AWSFileSystemId, "state", efsi.State)
 
 	return efsi, nil
+}
+
+// CreateEFSMountTargets creates the mount targets for all the Availability Zones
+func (a *Amazon) CreateEFSMountTargets(vpc *models.VPCInstance, efsi *models.EFSInstance) error {
+	ctx := context.Background()
+
+	subnetsOutput, err := a.ec2Client.DescribeSubnets(ctx, &ec2.DescribeSubnetsInput{
+		Filters: []types.Filter{
+			{
+				Name:   aws.String("vpc-id"),
+				Values: []string{vpc.AwsResourceId},
+			},
+		},
+	})
+	if err != nil {
+		a.l.Error("failed to describe subnets", "err", err, "vpc_id", vpc.AwsResourceId)
+		return err
+	}
+
+	for _, subnet := range subnetsOutput.Subnets {
+		out, err := a.efsClient.CreateMountTarget(ctx, &efs.CreateMountTargetInput{
+			FileSystemId:   aws.String(efsi.AWSFileSystemId),
+			SubnetId:       subnet.SubnetId,
+			SecurityGroups: []string{vpc.SecurityGroupID},
+		})
+		if err != nil {
+			a.l.Error("failed to create mount target", "err", err, "efs.id", efsi.AWSFileSystemId)
+			return err
+		}
+		a.l.Info("CreateMountTarget in-progress", "state", out.LifeCycleState, "subnet_id", *subnet.SubnetId)
+	}
+
+	return nil
 }
 
 // GetEFS returns an EFS based on the supplied deployment id
@@ -442,13 +542,24 @@ func (a *Amazon) StartTask(dep *models.Deployment, owner uuid.UUID, flags []mode
 	if err != nil {
 		return nil, err
 	}
+	if depVpc == nil {
+		return nil, ErrVPCDoesNotExist
+	}
+
 	depCluster, err := a.GetECSCluster(int(dep.Id))
 	if err != nil {
 		return nil, err
 	}
+	if depCluster == nil {
+		return nil, ErrClusterDoesNotExist
+	}
+
 	depTaskDef, err := a.GetTaskDefinition(int(dep.Id))
 	if err != nil {
 		return nil, err
+	}
+	if depTaskDef == nil {
+		return nil, ErrTaskDefDoesNotExist
 	}
 
 	ctx := context.Background()
@@ -462,6 +573,26 @@ func (a *Amazon) StartTask(dep *models.Deployment, owner uuid.UUID, flags []mode
 		a.l.Error("failed to describe task def", "err", err, "task_def.aws_arn", depTaskDef.AwsArn)
 		return nil, err
 	}
+
+	subnetsOutput, err := a.ec2Client.DescribeSubnets(ctx, &ec2.DescribeSubnetsInput{
+		Filters: []types.Filter{
+			{
+				Name:   aws.String("vpc-id"),
+				Values: []string{depVpc.AwsResourceId},
+			},
+		},
+	})
+	if err != nil {
+		a.l.Error("failed to describe subnets", "err", err, "vpc_id", depVpc.AwsResourceId)
+		return nil, err
+	}
+
+	var subnets []string
+	for _, subnet := range subnetsOutput.Subnets {
+		subnets = append(subnets, *subnet.SubnetId)
+	}
+
+	a.l.Debug("StartTask with Subnets", "subnets", subnets)
 
 	// Create overrides for the Flags.
 	var overrides []types3.ContainerOverride
@@ -489,7 +620,7 @@ func (a *Amazon) StartTask(dep *models.Deployment, owner uuid.UUID, flags []mode
 		LaunchType:     types3.LaunchTypeFargate,
 		NetworkConfiguration: &types3.NetworkConfiguration{
 			AwsvpcConfiguration: &types3.AwsVpcConfiguration{
-				Subnets:        []string{depVpc.SubnetID},
+				Subnets:        subnets,
 				AssignPublicIp: types3.AssignPublicIpEnabled,
 				SecurityGroups: []string{depVpc.SecurityGroupID},
 			},
