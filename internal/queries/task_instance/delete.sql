@@ -1,0 +1,1 @@
+DELETE FROM ecs_task_instances WHERE instance_owner_id = ?
