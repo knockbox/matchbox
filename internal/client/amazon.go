@@ -22,6 +22,7 @@ import (
 	"github.com/knockbox/matchbox/pkg/enums/vpc_instance"
 	"github.com/knockbox/matchbox/pkg/models"
 	"github.com/knockbox/matchbox/pkg/payloads"
+	"strings"
 	"time"
 )
 
@@ -722,6 +723,30 @@ func (a *Amazon) GetAndUpdateTask(taskDefId int, owner uuid.UUID) (*models.ECSTa
 
 	for _, task := range tasks.Tasks {
 		inst.UpdateFromTask(task)
+
+		for _, attachment := range task.Attachments {
+			if strings.EqualFold(*attachment.Type, "ElasticNetworkInterface") {
+				for _, detail := range attachment.Details {
+					if strings.EqualFold(*detail.Name, "networkInterfaceId") {
+
+						ifOut, err := a.ec2Client.DescribeNetworkInterfaces(context.Background(), &ec2.DescribeNetworkInterfacesInput{
+							NetworkInterfaceIds: []string{*detail.Value},
+						})
+						if err != nil {
+							a.l.Error("DescribeNetworkInterfaces failed", "err", err, "eni", *detail.Value)
+							break
+						}
+
+						for _, nif := range ifOut.NetworkInterfaces {
+							if nif.Association != nil {
+								inst.PublicIP = nif.Association.PublicIp
+							}
+						}
+						break
+					}
+				}
+			}
+		}
 	}
 
 	// Update the Instance in the database.

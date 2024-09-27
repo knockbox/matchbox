@@ -20,6 +20,7 @@ type ECSTaskInstance struct {
 	StoppedReason       *string                  `db:"stopped_reason"`
 	Status              ecs_task_instance.Status `db:"status"`
 	InstanceOwnerId     uuid.UUID                `db:"instance_owner_id"`
+	PublicIP            *string
 }
 
 func NewTaskInstance(taskDefId, clusterId uint, owner uuid.UUID) *ECSTaskInstance {
@@ -55,4 +56,34 @@ func (e *ECSTaskInstance) UpdateFromTask(task types.Task) {
 	case types.HealthStatusUnknown:
 		e.Status = ecs_task_instance.Unknown
 	}
+}
+
+func (e *ECSTaskInstance) DTO() *ECSTaskInstanceDTO {
+	return &ECSTaskInstanceDTO{
+		AwsArn:              e.AwsArn,
+		ECSTaskDefinitionId: e.ECSTaskDefinitionId,
+		ECSClusterId:        e.ECSClusterId,
+		PullStart:           e.PullStart,
+		PullStop:            e.PullStop,
+		StartedAt:           e.StartedAt,
+		StoppedAt:           e.StoppedAt,
+		StoppedReason:       e.StoppedReason,
+		Status:              e.Status,
+		InstanceOwnerId:     e.InstanceOwnerId,
+		PublicIP:            e.PublicIP,
+	}
+}
+
+type ECSTaskInstanceDTO struct {
+	AwsArn              string                   `json:"aws_arn"`
+	ECSTaskDefinitionId uint                     `json:"ecs_task_definition_id"`
+	ECSClusterId        uint                     `json:"ecs_cluster_id"`
+	PullStart           *time.Time               `json:"pull_start"`
+	PullStop            *time.Time               `json:"pull_stop"`
+	StartedAt           *time.Time               `json:"started_at"`
+	StoppedAt           *time.Time               `json:"stopped_at"`
+	StoppedReason       *string                  `json:"stopped_reason"`
+	Status              ecs_task_instance.Status `json:"status"`
+	InstanceOwnerId     uuid.UUID                `json:"instance_owner_id"`
+	PublicIP            *string                  `json:"public_ip"`
 }

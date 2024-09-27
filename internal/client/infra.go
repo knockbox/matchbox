@@ -114,6 +114,19 @@ func (i *Infra) StartTaskForEvent(event *models.Event, flags []models.EventFlag,
 	return err
 }
 
+func (i *Infra) GetTaskForEvent(event *models.Event, owner uuid.UUID) (*models.ECSTaskInstance, error) {
+	// Ensure the definition exists.
+	def, err := i.GetTaskDefinitionForEvent(event)
+	if err != nil {
+		return nil, err
+	}
+	if def == nil {
+		return nil, ErrTaskDefDoesNotExist
+	}
+
+	return i.amz.GetAndUpdateTask(int(def.Id), owner)
+}
+
 func (i *Infra) StopTaskForEvent(event *models.Event, owner uuid.UUID) error {
 	// Ensure the definition exists.
 	def, err := i.GetTaskDefinitionForEvent(event)

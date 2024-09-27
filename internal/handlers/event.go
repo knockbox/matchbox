@@ -445,6 +445,38 @@ func (e *Event) StartTaskForActivity(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 }
 
+func (e *Event) GetTaskForActivity(w http.ResponseWriter, r *http.Request) {
+	ev := r.Context().Value(middleware.ActivityIdContextKey).(*models.Event)
+	token := *r.Context().Value(middleware2.BearerTokenContextKey).(*jwt.Token)
+	accountId, _, _ := utils.ParseUserClaims(token)
+
+	participant, err := e.ec.GetParticipantByEventAndParticipantId(ev, accountId)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		responses.NewGenericError("failed to retrieve participants for event").Encode(w)
+		return
+	}
+
+	if participant == nil || !participant.CanRedeemFlag() {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		responses.NewGenericError("you are not a member of this event").Encode(w)
+		return
+	}
+
+	inst, err := e.in.GetTaskForEvent(ev, accountId)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		responses.NewGenericError(err.Error()).Encode(w)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(inst.DTO())
+}
+
 func (e *Event) StopTaskForActivity(w http.ResponseWriter, r *http.Request) {
 	ev := r.Context().Value(middleware.ActivityIdContextKey).(*models.Event)
 	token := *r.Context().Value(middleware2.BearerTokenContextKey).(*jwt.Token)
@@ -488,6 +520,7 @@ func (e *Event) Route(r *mux.Router) {
 	activityRouter.HandleFunc("/task", e.CreateTaskDefinitionForActivity).Methods(http.MethodPost)
 	activityRouter.HandleFunc("/task", e.StartTaskForActivity).Methods(http.MethodPut)
 	activityRouter.HandleFunc("/task", e.StopTaskForActivity).Methods(http.MethodDelete)
+	activityRouter.HandleFunc("/task", e.GetTaskForActivity).Methods(http.MethodGet)
 
 	flagRouter := activityRouter.PathPrefix("/flags").Subrouter()
 	flagRouter.HandleFunc("", e.CreateFlagForActivity).Methods(http.MethodPost)
