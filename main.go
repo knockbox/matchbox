@@ -8,8 +8,6 @@ import (
 	"github.com/knockbox/authentication/pkg/middleware"
 	"github.com/knockbox/authentication/pkg/utils"
 	"github.com/knockbox/matchbox/internal/handlers"
-	"github.com/rs/cors"
-	"net/http"
 	"os"
 )
 
@@ -61,17 +59,5 @@ func main() {
 
 	handlers.NewEvent(l).Route(protectedRouter)
 
-	handler := cors.New(cors.Options{
-		AllowedOrigins: []string{"*"},
-		AllowedMethods: []string{
-			http.MethodGet,
-			http.MethodPost,
-			http.MethodPut,
-			http.MethodPatch,
-			http.MethodDelete,
-		},
-		AllowCredentials: true,
-	}).Handler(sm)
-
-	utils.StartServerWithGracefulShutdown(handler, bindAddress, l)
+	utils.StartServerWithGracefulShutdown(middleware.CORSMiddleware(sm), bindAddress, l)
 }

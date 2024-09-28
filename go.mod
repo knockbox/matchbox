@@ -13,7 +13,7 @@ require (
 	github.com/hashicorp/go-hclog v1.6.3
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/joho/godotenv v1.5.1
-	github.com/knockbox/authentication v0.0.0-20240920181110-87bca18353c5
+	github.com/knockbox/authentication v0.0.0-20240928043756-5641c498da36
 	github.com/lestrrat-go/jwx/v2 v2.1.1
 	github.com/rs/cors v1.11.1
 	github.com/stretchr/testify v1.9.0
