@@ -23,3 +23,19 @@ func NewFlagHistory(event *Event, participant *EventParticipant, flag *EventFlag
 		RedeemerId: participant.ParticipantId,
 	}
 }
+
+func (f *EventFlagHistory) DTO() *EventFlagHistoryDTO {
+	return &EventFlagHistoryDTO{
+		EventId:    f.EventId,
+		FlagId:     f.FlagId,
+		Timestamp:  f.Timestamp,
+		RedeemerId: f.RedeemerId,
+	}
+}
+
+type EventFlagHistoryDTO struct {
+	EventId    uint      `json:"event_id"`
+	FlagId     uint      `json:"flag_id"`
+	Timestamp  time.Time `json:"timestamp"`
+	RedeemerId uuid.UUID `json:"redeemer_id"`
+}

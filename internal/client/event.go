@@ -173,3 +173,7 @@ func (e *EventClient) GetRedeemedFlag(event *models.Event, participant *models.E
 	}
 	return history, err
 }
+
+func (e *EventClient) GetAllHistoryForEvent(event *models.Event) ([]models.EventFlagHistory, error) {
+	return e.flagHistory.GetByEvent(int(event.Id))
+}

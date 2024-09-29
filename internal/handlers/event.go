@@ -382,6 +382,30 @@ func (e *Event) CaptureFlag(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (e *Event) GetFlagHistory(w http.ResponseWriter, r *http.Request) {
+	ev := r.Context().Value(middleware.ActivityIdContextKey).(*models.Event)
+
+	history, err := e.ec.GetAllHistoryForEvent(ev)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		e.l.Error("failed to get history", "err", err)
+		return
+	}
+
+	if len(history) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	var dtos []*models.EventFlagHistoryDTO
+	for _, record := range history {
+		dtos = append(dtos, record.DTO())
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(dtos)
+}
+
 func (e *Event) CreateTaskDefinitionForActivity(w http.ResponseWriter, r *http.Request) {
 	ev := r.Context().Value(middleware.ActivityIdContextKey).(*models.Event)
 	token := *r.Context().Value(middleware2.BearerTokenContextKey).(*jwt.Token)
@@ -527,6 +551,7 @@ func (e *Event) Route(r *mux.Router) {
 	flagRouter.HandleFunc("", e.GetFlagForActivity).Methods(http.MethodGet)
 	flagRouter.HandleFunc("/{flag_id}", e.UpdateFlagForActivity).Methods(http.MethodPut)
 	flagRouter.HandleFunc("/{flag_id}", e.DeleteFlagForActivity).Methods(http.MethodDelete)
+	flagRouter.HandleFunc("/history", e.GetFlagHistory).Methods(http.MethodGet)
 
 	participantRouter := activityRouter.PathPrefix("/participants").Subrouter()
 	participantRouter.HandleFunc("/{participant_id}", e.CreateParticipantForActivity).Methods(http.MethodPost)
